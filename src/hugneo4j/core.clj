@@ -1,7 +1,7 @@
 (ns hugneo4j.core
   (:require [hugneo4j.parser :as parser]
             [hugneo4j.parameters :as parameters]
-            [hugneo4j.cypher :as cypher :use [connect]]
+            [hugneo4j.cypher :as cypher]
             [clojure.java.io :as io]
             [clojure.tools.logging :as log]
             [clojure.string :as string]
@@ -26,7 +26,10 @@
       (if-let [f (io/resource file)]
         f
         (throw (ex-info (str "Can not read file: " file) {})))))
-   {:file file}))
+   {:file (condp instance? file
+            java.io.File (.getName file)
+            java.net.URL (.getFile file)
+            file)}))
 
 (defn ^:no-doc validate-parsed-def!
   "Ensure Neo4j required headers are provided
@@ -102,7 +105,7 @@
   (let [nam (or (:name header) (:name- header))]
     (keyword
      (or
-      ;;                   ↓ short-hand result position
+      ;;                      ↓ short-hand result position
       ;; -- :name my-fn :obj :1 :dp
       (when-let [r (second (next nam))] (str->key r))
       ;; -- :result :1
@@ -154,14 +157,17 @@
 (defmethod audit-fn :default [sym] `cypher/without-audit)
 
 (defmulti response-fn identity)
-(defmethod response-fn :list [sym] 'cypher/to-list)
-(defmethod response-fn :obj [sym] 'cypher/to-obj)
+(defmethod response-fn :list [sym] `cypher/to-list)
+(defmethod response-fn :obj [sym] `cypher/to-obj)
+(defmethod response-fn :bool [sym] `cypher/to-bool)
+(defmethod response-fn :default [sym] `cypher/to-obj)
 
 (defmulti result-fn identity)
-(defmethod result-fn :1 [sym] 'cypher/first-result)
-(defmethod result-fn :one [sym] 'cypher/first-result)
-(defmethod result-fn :* [sym] 'cypher/all-results)
-(defmethod result-fn :many [sym] 'cypher/all-results)
+(defmethod result-fn :1 [sym] `cypher/first-result)
+(defmethod result-fn :one [sym] `cypher/first-result)
+(defmethod result-fn :* [sym] `cypher/all-results)
+(defmethod result-fn :many [sym] `cypher/all-results)
+(defmethod result-fn :default [sym] `cypher/all-results)
 
 (defn cyphervec-fn*
   "Given parsed cypher and optional options, return an
@@ -304,13 +310,13 @@
                       :audit audit :debug debug})]
         (as-> parsed-cypher var-x
           (prepare-cypher var-x param-data o)
-          ((resolve (debug-fn debug)) var-x o)
-          (cypher/query conn var-x o)
+          ((resolve (debug-fn debug)) var-x param-data)
+          (cypher/query conn var-x)
           ((resolve (audit-fn audit)) conn var-x o
            (:audit options)
            param-data)
-          ((resolve (response-fn response)) var-x)
           ((resolve (result-fn result)) var-x)
+          ((resolve (response-fn response)) var-x)
           ((resolve (output-fn debug)) var-x o)))))))
 
 (defn db-fn
@@ -332,13 +338,14 @@
    {:fn-name {:meta {:doc \"doc string\"}
               :fn <anon-db-fn>}"
   [{:keys [cypher header file line]} options]
-  (let [privat-name (:name- header)
-        fn-name (symbol (first (or (:name header) privat-name)))
+  (let [private-name (:name- header)
+        fn-name (symbol (first (or (:name header) private-name)))
         doc (or (first (:doc header)) "")
         response (response-sym header)
         result (result-sym header)
         debug (debug-sym header)
         audit (audit-sym header)
+        params-sym {:keys (mapv symbol (:params header))}
         meta (merge (if-let [m (:meta header)]
                       (edn/read-string (string/join " " m)) {})
                     {:doc doc
@@ -348,10 +355,10 @@
                      :audit audit
                      :file (:file header)
                      :line (:line header)
-                     :arglists '([db]
-                                 [db params]
-                                 [db params options & command-options])}
-                    (when privat-name {:private true}))]
+                     :arglists `([~'db ~params-sym]
+                                 [~'db ~params-sym]
+                                 [~'db ~params-sym ~'options & ~'command-options])}
+                    (when private-name {:private true}))]
     {(keyword fn-name) {:meta meta
                         :fn (db-fn* cypher response result audit
                                     debug (assoc options :fn-name fn-name

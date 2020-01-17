@@ -1,10 +1,19 @@
 (ns hugneo4j.cypher
   (:require [clojurewerkz.neocons.bolt :as neobolt]
+            [selmer.parser :as parser]
             [clojure.tools.logging :as log]))
 
 (defn- is-driver-obj? [v]
   (or (= (type v) org.neo4j.driver.internal.InternalRelationship)
       (= (type v) org.neo4j.driver.internal.InternalNode)))
+
+(defn- get-datetime-helper []
+  (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd'T'HH:mm:ssZ")]                       
+    (.format fmt
+             (.getTime
+              (doto (java.util.Calendar/getInstance)
+                (.setTime (java.util.Date.))
+                (.add java.util.Calendar/HOUR_OF_DAY 1))))))
 
 (let [default-audit-params (atom {:node nil
                                   :id-attribute nil
@@ -45,10 +54,12 @@
      (neobolt/connect database-url username password)))
 
   (defn query
-    [conn query-info-list options]
+    [conn query-info-list]
     (with-open [session (neobolt/create-session conn)]
       (let [query-list (first query-info-list)]
-        [(neobolt/query session (first query-list) (apply merge {} (second query-list)))
+        [(neobolt/query session
+                        (first query-list)
+                        (apply merge {} (second query-list)))
          (second query-info-list)])))
 
   (defn without-audit
@@ -104,8 +115,11 @@
                                               (name (get-in audit-params [:by :param]))
                                               (name (:by audit-params)))]
                              (merge {param-name (get data-params (keyword param-name))
-                                     "audit-props" {"message" (:message audit-params)
-                                                    "created-on" "2019"}}
+                                     "audit-props" {"message" (if (keyword? (:message audit-params))
+                                                                (get data-params
+                                                                     (keyword (:message audit-params)))
+                                                                (:message audit-params))
+                                                    "created-on" (get-datetime-helper)}}
                                     (into {}
                                           (for [[k v] query-response
                                                 :when (is-driver-obj? v)]
@@ -154,6 +168,10 @@
                                (for [[sub-k sub-v] (.asMap v)]
                                  [(keyword sub-k) sub-v]))
                          v)])))
+(defn to-bool
+  [query-responses-list]
+  [(not (empty? (first query-responses-list)))
+   (second query-responses-list)])
 
 (defn to-list
   [query-responses-list]
@@ -198,22 +216,26 @@
 
 
 (defn no-debug-needed
-  [query-responses options]
-  [query-responses])
+  [query-responses param-data]
+  [[(parser/render (first query-responses) param-data)
+    (second query-responses)]
+   nil])
 
 (defn debug
-  [query-responses options]
-  (log/debug "[CYPHER] " (first query-responses)
-             "  |||  [PARAMS] " (apply merge (second query-responses)))
-  [query-responses])
+  [query-responses param-data]
+  (let [query-str (parser/render (first query-responses) param-data)]
+    (log/debug "[CYPHER] " query-str
+               "\n|||\n[PARAMS] " (apply merge (second query-responses)))
+    [[query-str (second query-responses)] nil]))
 
 (defn monitor
-  [query-responses options]
-  [query-responses (System/nanoTime)])
+  [query-responses param-data]
+  [[(parser/render (first query-responses) param-data)
+    (second query-responses)]
+   (System/nanoTime)])
 
 (defn debug-and-monitor
-  [query-responses options]
-  (log/debug "[CYPHER] " (first query-responses)
-             "  |||  [PARAMS] " (apply merge (second query-responses)))
-  [query-responses (System/nanoTime)])
+  [query-responses param-data]
+  (let [debug-results (debug query-responses param-data)]
+    [(first debug-results) (System/nanoTime)]))
 
