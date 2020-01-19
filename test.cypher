@@ -19,4 +19,4 @@ MATCH  (u:User {username:$user-id})-[:Has]->(c:Client)
 
 -- :name change-user-name :obj :1
 -- :audit {:by {:node "User" :attribute "username" :param :by} :nodes [f] :message :msg}
-MATCH (f:User {username:$user-id}) SET f.`newhere`=$info RETURN f 
+MATCH (f:User {username:$user-id}) SET f.`username`=$info RETURN f

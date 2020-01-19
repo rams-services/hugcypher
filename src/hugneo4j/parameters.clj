@@ -31,9 +31,14 @@
   (value-param [param data options]
     (let [param-name (if (keyword? (:name param))
                        (name (:name param))
-                       (:name param))]
+                       (:name param))
+          value (get-in data (deep-get-vec (:name param)))]
       [(str "$`"  param-name "`")
-       {param-name (get-in data (deep-get-vec (:name param)))}])))
+       {param-name (if (map? value)
+                     (into {}
+                           (for [[k v] value]
+                             [(name k) v]))
+                     value)}])))
 
 (defmulti apply-hugneo4j-param
   "Implementations of this multimethod apply a hugneo4j parameter
