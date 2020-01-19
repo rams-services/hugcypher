@@ -87,9 +87,11 @@
                                                                 (get-in audit-params [:by :attribute]))
                                                          (get-in audit-params [:by :attribute])
                                                          (:id-attribute @default-audit-params))
-                                "`=$`" (if (map? (:by audit-params))
-                                         (name (get-in audit-params [:by :param]))
-                                         (name (:by audit-params))) "` "
+                                "`=$`" (if (not (contains? audit-params :by))
+                                         "by"
+                                         (if (map? (:by audit-params))
+                                           (name (get-in audit-params [:by :param]))
+                                           (name (:by audit-params)))) "` "
                                 (clojure.string/join
                                  " " (for [[k v] query-response
                                            :when (and (is-driver-obj? v)
@@ -115,10 +117,12 @@
                                               (name (get-in audit-params [:by :param]))
                                               (name (:by audit-params)))]
                              (merge {param-name (get data-params (keyword param-name))
-                                     "audit-props" {"message" (if (keyword? (:message audit-params))
-                                                                (get data-params
-                                                                     (keyword (:message audit-params)))
-                                                                (:message audit-params))
+                                     "audit-props" {"message" (if (not (contains? audit-props :message))
+                                                                (get data-params :message)
+                                                                (if (keyword? (:message audit-params))
+                                                                  (get data-params
+                                                                       (keyword (:message audit-params)))
+                                                                  (:message audit-params)))
                                                     "created-on" (get-datetime-helper)}}
                                     (into {}
                                           (for [[k v] query-response

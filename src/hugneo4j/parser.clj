@@ -325,11 +325,15 @@
                                                         (set (when (:audit header)
                                                                (let [audit (edn/read-string
                                                                             (get-in header [:audit 0]))]
-                                                                 (concat (if (map? (:by audit))
-                                                                           [(get-in audit [:by :param])]
-                                                                           (:by audit))
-                                                                         (when (keyword? (:message audit))
-                                                                           [(:message audit)])))))))))
+                                                                 (concat (if (not (contains? audit :by))
+                                                                           [:by]
+                                                                           (if (map? (:by audit))
+                                                                             [(get-in audit [:by :param])]
+                                                                             [(:by audit)]))
+                                                                         (if (not (contains? audit :message))
+                                                                           [:message]
+                                                                           (when (keyword? (:message audit))
+                                                                             [(:message audit)]))))))))))
                                    :cypher (filterv seq (conj neo4j (str string-builder)))}))
                           [])
                    (recur (merge header x) neo4j string-builder all parameters))
