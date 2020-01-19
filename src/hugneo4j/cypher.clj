@@ -117,7 +117,7 @@
                                               (name (get-in audit-params [:by :param]))
                                               (name (:by audit-params)))]
                              (merge {param-name (get data-params (keyword param-name))
-                                     "audit-props" {"message" (if (not (contains? audit-props :message))
+                                     "audit-props" {"message" (if (not (contains? audit-params :message))
                                                                 (get data-params :message)
                                                                 (if (keyword? (:message audit-params))
                                                                   (get data-params

@@ -20,3 +20,24 @@ MATCH  (u:User {username:$user-id})-[:Has]->(c:Client)
 -- :name change-user-name :obj :1
 -- :audit {:by {:node "User" :attribute "username" :param :by} :nodes [f] :message :msg}
 MATCH (f:User {username:$user-id}) SET f.`username`=$info RETURN f
+
+-- :name get-user-activity :list :*
+MATCH (u:User {id:$user-id})-[r:Audit]->(q) RETURN r ORDER BY r.`created-on` desc
+
+-- :name create-user :list :1
+-- :audit {:by :by :message :action :nodes [u]}
+CREATE (u:User {id:$id, `first-name`: $first-name, `last-name`: $last-name, `active?`: $active?, password: $password, `joined-on`: $now}) RETURN u
+
+-- :name get-users :list :1
+MATCH (u:User) OPTIONAL MATCH (u)-[:HasRole]->(r:Role) RETURN distinct u.id as id, u.`first-name` as `first-name`, u.`last-name` as `last-name`, u.`active?` as `active?`, u.`joined-on` as `joined-on`, collect({id: r.id, name: r.name}) as roles
+
+-- :name get-user-with-credentials :list :1
+MATCH (u:User) OPTIONAL MATCH (u)-[:HasRole]->(r:Role) RETURN u, collect({id: r.id, name: r.name}) as roles
+
+
+-- :name give-user-module :list :1
+-- :audit {:nodes [u, m, p]}
+MATCH (u:User {id:$user-id})
+MATCH (m:Module {id:$module-id})
+MATCH (p:Permission {id:$permission})
+MERGE (u)-[{{permission}}]->(m) return u, m, p

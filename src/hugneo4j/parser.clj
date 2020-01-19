@@ -242,6 +242,26 @@
              (keyword namespace name)
              (keyword name))}))
 
+(defn- get-params-for-header [parameters cypher-list header]
+  (into
+   []
+   (clojure.set/union
+    (set parameters)
+    (selmer/known-variables
+     (string/join cypher-list))
+    (set (when (:audit header)
+           (let [audit (edn/read-string
+                        (get-in header [:audit 0]))]
+             (concat (if (not (contains? audit :by))
+                       [:by]
+                       (if (map? (:by audit))
+                         [(get-in audit [:by :param])]
+                         [(:by audit)]))
+                     (if (not (contains? audit :message))
+                       [:message]
+                       (when (keyword? (:message audit))
+                         [(:message audit)])))))))))
+
 (defn parse
   "Parse hugneo4j Cypher string and return
    sequence of statement definitions
@@ -283,20 +303,9 @@
                               {:header (when (not (empty? header))
                                          (assoc
                                           header
-                                          :params (into
-                                                   []
-                                                   (clojure.set/union
-                                                    (set parameters)
-                                                    (selmer/known-variables
-                                                     (string/join cypher-list))
-                                                    (set (when (:audit header)
-                                                           (let [audit (edn/read-string
-                                                                        (get-in header [:audit 0]))]
-                                                             (concat (if (map? (:by audit))
-                                                                       [(get-in audit [:by :param])]
-                                                                       (:by audit))
-                                                                     (when (keyword? (:message audit))
-                                                                       [(:message audit)])))))))))
+                                          :params (get-params-for-header parameters
+                                                                             cypher-list
+                                                                             header)))
                                :cypher cypher-list}))))
 
              (or
@@ -316,24 +325,9 @@
                                   {:header (when (not (empty? header))
                                              (assoc
                                               header
-                                              :params (into
-                                                       []
-                                                       (clojure.set/union
-                                                        (set parameters)
-                                                        (selmer/known-variables
-                                                         (string/join cypher-list))
-                                                        (set (when (:audit header)
-                                                               (let [audit (edn/read-string
-                                                                            (get-in header [:audit 0]))]
-                                                                 (concat (if (not (contains? audit :by))
-                                                                           [:by]
-                                                                           (if (map? (:by audit))
-                                                                             [(get-in audit [:by :param])]
-                                                                             [(:by audit)]))
-                                                                         (if (not (contains? audit :message))
-                                                                           [:message]
-                                                                           (when (keyword? (:message audit))
-                                                                             [(:message audit)]))))))))))
+                                              :params (get-params-for-header parameters
+                                                                             cypher-list
+                                                                             header)))
                                    :cypher (filterv seq (conj neo4j (str string-builder)))}))
                           [])
                    (recur (merge header x) neo4j string-builder all parameters))
