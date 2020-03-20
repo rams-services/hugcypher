@@ -7,8 +7,11 @@
   (or (= (type v) org.neo4j.driver.internal.InternalRelationship)
       (= (type v) org.neo4j.driver.internal.InternalNode)))
 
-(defn- is-random-access-list? [v]
-  (= (type v) java.util.Collections$UnmodifiableRandomAccessList))
+(defn- is-java-list? [v]
+  (or (= (type v) java.util.Collections$UnmodifiableRandomAccessList)
+      (= (type v) java.util.Collections$SingletonList)
+      (= (type v) java.util.Collections$CheckedList)
+      (= (type v) java.util.Collections$UnmodifiableList)))
 
 (defn- get-datetime-helper []
   (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd'T'HH:mm:ssZ")]                       
@@ -158,7 +161,7 @@
               val (get item it)]
           (recur (rest its)
                  (cond
-                   (is-random-access-list? val)
+                   (is-java-list? val)
                    (assoc out (keyword it)
                           (map listify-helper val))
                    (is-driver-obj? val)
@@ -176,7 +179,7 @@
   (into {}
         (for [[k v] item]
           [(keyword k) (cond
-                         (is-random-access-list? v)
+                         (is-java-list? v)
                          (map (fn [temp]
                                 (listify-helper (if (is-driver-obj? temp)
                                                   (.asMap temp)
