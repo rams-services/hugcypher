@@ -7,6 +7,9 @@
   (or (= (type v) org.neo4j.driver.internal.InternalRelationship)
       (= (type v) org.neo4j.driver.internal.InternalNode)))
 
+(defn- is-random-access-list? [v]
+  (= (type v) java.util.Collections$UnmodifiableRandomAccessList))
+
 (defn- get-datetime-helper []
   (let [fmt (java.text.SimpleDateFormat. "yyyy-MM-dd'T'HH:mm:ssZ")]                       
     (.format fmt
@@ -154,24 +157,36 @@
         (let [it (first its)
               val (get item it)]
           (recur (rest its)
-                 (if (is-driver-obj? val)
+                 (cond
+                   (is-random-access-list? val)
+                   (assoc out (keyword it)
+                          (map listify-helper val))
+                   (is-driver-obj? val)
                    (let [value-map (.asMap val)]
                      (apply merge out
                             (for [[k v] value-map]
                               (if (= (count (get list-keys k)) 1)
                                 (assoc out (keyword k) v)
                                 (assoc out (keyword (str it "." k)) v)))))
+                   true
                    (assoc out (keyword it) val))))))))
 
 (defn- objectify-helper
   [item]
   (into {}
         (for [[k v] item]
-          [(keyword k) (if (is-driver-obj? v)
+          [(keyword k) (cond
+                         (is-random-access-list? v)
+                         (map (fn [temp]
+                                (listify-helper (if (is-driver-obj? temp)
+                                                  (.asMap temp)
+                                                  temp)))
+                              v)
+                         (is-driver-obj? v)
                          (into {}
                                (for [[sub-k sub-v] (.asMap v)]
                                  [(keyword sub-k) sub-v]))
-                         v)])))
+                         true v)])))
 (defn to-bool
   [query-responses-list]
   [(not (empty? (first query-responses-list)))

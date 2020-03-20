@@ -41,3 +41,8 @@ MATCH (u:User {id:$user-id})
 MATCH (m:Module {id:$module-id})
 MATCH (p:Permission {id:$permission})
 MERGE (u)-[{{permission}}]->(m) return u, m, p
+
+-- :name collect-data :list :*
+MATCH (c:Constituents)-[:Contains]-(f) return c, collect(f) as collection
+LIMIT 10
+

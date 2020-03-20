@@ -1,4 +1,4 @@
-(defproject hugneo4j "0.0.5"
+(defproject hugneo4j "0.0.6"
   :description "HugNeo4j offers a similar experience to the excellent HugSql library but for neo4j. As a matter of fact this library copies some very important parts from HugSql"
   :url "https://github.com/rams-services/hugneo4j"
   :license {:name "Apache License, Version 2.0"
