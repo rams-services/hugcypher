@@ -29,27 +29,27 @@
                                   :made-relation "AuditMadeOf"})]
 
   (defn set-audit-params
-    [& {:keys [node-label node-id-attribute
-               default-node-id audit-relationship
-               audit-node audit-made-relationship]}]
-    (reset! default-node-id {:node (if node-label
-                                     node-label
-                                     (:node @default-audit-params))
-                             :id-attribute (if node-id-attribute
-                                             node-id-attribute
-                                             (:id-attribute @default-audit-params))
-                             :relationship (if audit-relationship
-                                             audit-relationship
-                                             (:relationship @default-audit-params))
-                             :connecting-node (if audit-node
-                                                audit-node
-                                                (:connecting-node @default-audit-params))
-                             :made-relation (if audit-made-relationship
-                                              audit-made-relationship
-                                              (:made-relation @default-audit-params))
-                             :default-id (if default-node-id
-                                           default-node-id
-                                           (:default-id @default-audit-params))}))
+    [{:keys [node-label node-id-attribute
+             default-node-id audit-relationship
+             audit-node audit-made-relationship]}]
+    (reset! default-audit-params {:node (if node-label
+                                          node-label
+                                          (:node @default-audit-params))
+                                  :id-attribute (if node-id-attribute
+                                                  node-id-attribute
+                                                  (:id-attribute @default-audit-params))
+                                  :relationship (if audit-relationship
+                                                  audit-relationship
+                                                  (:relationship @default-audit-params))
+                                  :connecting-node (if audit-node
+                                                     audit-node
+                                                     (:connecting-node @default-audit-params))
+                                  :made-relation (if audit-made-relationship
+                                                   audit-made-relationship
+                                                   (:made-relation @default-audit-params))
+                                  :default-id (if default-node-id
+                                                default-node-id
+                                                (:default-id @default-audit-params))}))
   
   (defn connect
     ([database-url]
