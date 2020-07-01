@@ -3,7 +3,6 @@
             [hugneo4j.parameters :as parameters]
             [hugneo4j.cypher :as cypher]
             [clojure.java.io :as io]
-            [clojure.tools.logging :as log]
             [clojure.string :as string]
             [clojure.tools.reader.edn :as edn]))
 

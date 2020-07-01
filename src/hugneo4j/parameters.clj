@@ -1,9 +1,14 @@
 (ns hugneo4j.parameters
-  (:require [clojure.string :as string]))
+  (:require [clojure.string :as string]
+            [clojure.walk :as walk]))
 
 (defprotocol ValueParam
   "Protocol to convert Clojure value to Neo4j value"
   (value-param [param data options]))
+
+(defprotocol MapSet
+  "Protocol to convert Clojure object to Neo4j Set result"
+  (build-set-from-map [param data options]))
 
 
 (defn deep-get-vec
@@ -38,7 +43,21 @@
                      (into {}
                            (for [[k v] value]
                              [(name k) v]))
-                     value)}])))
+                     value)}]))
+  MapSet
+  (build-set-from-map [param data options]
+    (let [param-object (if (keyword? (:map-object param))
+                         (name (:map-object param))
+                         (:map-object param))
+          param-name (if (keyword? (:name param))
+                       (name (:name param))
+                       (:name param))]
+      [(string/join ", " (doall (for [[prop val] ((:name param) data)
+                                      :let [prop-name (if (keyword? prop)
+                                                        (name prop)
+                                                        prop)]]
+                                  (str "`" param-object "`.`" prop-name "` = $`" param-name "`.`" prop-name "`"))))
+       {param-name (walk/stringify-keys ((:name param) data))}])))
 
 (defmulti apply-hugneo4j-param
   "Implementations of this multimethod apply a hugneo4j parameter
@@ -47,3 +66,5 @@
 
 (defmethod apply-hugneo4j-param :v  [param data options] (value-param param data options))
 (defmethod apply-hugneo4j-param :value [param data options] (value-param param data options))
+(defmethod apply-hugneo4j-param :m [param data options] (build-set-from-map param data options))
+(defmethod apply-hugneo4j-param :map [param data options] (build-set-from-map param data options))
