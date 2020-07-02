@@ -134,6 +134,13 @@
   [reader]
   (read-param-helper reader \:))
 
+(defn- split-hash-param
+  [param-str & {:keys [reader]}]
+  (let [result (string/split param-str #"\$")]
+    (if (= (count result) 2)
+      result
+      (parse-error reader (str "Hash param wrong format: #" param-str)))))
+
 (defn- sing-line-comment-start?
   [c reader]
   (and c (= \- c) (= \- (r/peek-char reader))))
@@ -248,15 +255,15 @@
 
 (defn read-neo4j-map-object
   [reader c]
-  (let [{:keys [name namespace _] :as map-object} (read-param reader c)
-        {:keys [name namespace type]} (read-param reader \$)]
-    {:type (keyword "m")
+  (let [{:keys [name namespace type]} (read-param reader c)
+        [map-object-name param-name] (split-hash-param name)]
+    {:type (keyword (or type "m"))
      :name (if namespace
-             (keyword namespace name)
-             (keyword name))
-     :map-object (if (:namespace map-object)
-                   (keyword (:namespace map-object) (:name map-object))
-                   (keyword (:name map-object)))}))
+             (keyword namespace param-name)
+             (keyword param-name))
+     :map-object (if namespace
+                   (keyword namespace map-object-name)
+                   (keyword map-object-name))}))
 
 (defn- get-params-for-header [parameters cypher-list header]
   (into
