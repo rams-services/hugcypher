@@ -127,12 +127,19 @@
 
 
 (defn- read-param
-  [reader]
-  (read-param-helper reader \$))
+  [reader c]
+  (read-param-helper reader c))
 
 (defn- read-keyword
   [reader]
   (read-param-helper reader \:))
+
+(defn- split-hash-param
+  [param-str & {:keys [reader]}]
+  (let [result (string/split param-str #"\$")]
+    (if (= (count result) 2)
+      result
+      (parse-error reader (str "Hash param wrong format: #" param-str)))))
 
 (defn- sing-line-comment-start?
   [c reader]
@@ -153,6 +160,10 @@
 (defn- param-start?
   [c]
   (= \$ c))
+
+(defn- hash-start?
+  [h]
+  (= \# h))
 
 (defn- values-vector
   [s]
@@ -236,11 +247,23 @@
 
 (defn- read-neo4j-param
   [reader c]
-  (let [{:keys [name namespace type]} (read-param reader)]
+  (let [{:keys [name namespace type]} (read-param reader c)]
     {:type (keyword (or type "v"))
      :name (if namespace
              (keyword namespace name)
              (keyword name))}))
+
+(defn read-neo4j-map-object
+  [reader c]
+  (let [{:keys [name namespace type]} (read-param reader c)
+        [map-object-name param-name] (split-hash-param name)]
+    {:type (keyword (or type "m"))
+     :name (if namespace
+             (keyword namespace param-name)
+             (keyword param-name))
+     :map-object (if namespace
+                   (keyword namespace map-object-name)
+                   (keyword map-object-name))}))
 
 (defn- get-params-for-header [parameters cypher-list header]
   (into
@@ -347,6 +370,17 @@
              (unmatched-quoted? character)
              (parse-error reader (str "Unmatched Neo4j quote: " character))
 
+             (hash-start? character)
+             (let [param (read-neo4j-map-object reader character)]
+               (recur header (vec (filter seq
+                                   (conj neo4j (str string-builder)
+                                         param))) (new-string-builder) all (cond (= (:type param) :v)
+                            (conj parameters (:name param))
+                            (= (:type param) :m)
+                            (conj parameters (:name param))
+                            :else
+                            parameters)))
+             
              (param-start? character)
              (let [param (read-neo4j-param reader character)]
                (recur header
@@ -355,9 +389,12 @@
                                          param)))
                       (new-string-builder)
                       all
-                      (if (= (:type param) :v)
-                        (conj parameters (:name param))
-                        parameters)))
+                      (cond (= (:type param) :v)
+                            (conj parameters (:name param))
+                            (= (:type param) :m)
+                            (conj parameters (:name param))
+                            :else
+                            parameters)))
 
              :else
              (if (and (not (string/blank? string-builder)) (empty? header) (not no-header))

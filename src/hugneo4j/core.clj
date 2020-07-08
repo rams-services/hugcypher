@@ -3,7 +3,6 @@
             [hugneo4j.parameters :as parameters]
             [hugneo4j.cypher :as cypher]
             [clojure.java.io :as io]
-            [clojure.tools.logging :as log]
             [clojure.string :as string]
             [clojure.tools.reader.edn :as edn]))
 
@@ -51,15 +50,20 @@
    and throw an exception if mismatch."
   [cypher-template param-data]
   (let [not-found (Object.)]
-    (doseq [k (map :name (filter map? cypher-template))]
-      (when-not
-       (not-any?
-        #(= not-found %)
-        (map #(get-in param-data % not-found)
-             (rest (reductions
-                    (fn [r x] (conj r x))
-                    []
-                    (parameters/deep-get-vec k)))))
+    (doseq [param (filter map? cypher-template)
+            :let [k (:name param)
+                  h? (:map-object param)]]
+      (when
+          (or
+           (some
+            #(= not-found %)
+            (map #(get-in param-data % not-found)
+                 (rest (reductions
+                        (fn [r x] (conj r x))
+                        []
+                        (parameters/deep-get-vec k)))))
+           (and h?
+                (empty? (get-in param-data (parameters/deep-get-vec k) not-found))))
         (throw (ex-info
                 (str "Parameter Mismatch: "
                      k " parameter data not found.") {}))))))
