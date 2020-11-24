@@ -1,6 +1,7 @@
 (ns hugneo4j.parser
   (:require [clojure.string :as string]
             [selmer.parser :as selmer]
+            [clojure.tools.logging :as log]
             [clojure.tools.reader.reader-types :as r]
             [clojure.tools.reader.edn :as edn]))
 
@@ -193,6 +194,22 @@
                  (r/read-char reader)
                  (r/peek-char reader)))))))
 
+(defn- read-sing-line-expr
+  [rdr]
+  (let [_    (r/read-char rdr) ; eat ~
+        expr (string/trim (read-to-char rdr \newline))]
+    [expr :end]))
+
+(defn- read-mult-line-expr
+  [rdr]
+  (let [_ (r/read-char rdr) ; eat ~
+        expr (string/trim (read-to-chars rdr \* \/))
+        _    (skip-to-chars rdr \* \/)
+        end? (= \~ (last expr))
+        expr (if end? (string/trim (string/join "" (butlast expr))) expr)
+        sign (if end? :end :cont)]
+    (if (string/blank? expr) [sign] [expr sign])))
+
 (defn- read-sing-line-header
   [reader]
   (let [_   (r/read-char reader) ; eat colon (:)
@@ -222,6 +239,7 @@
   (skip-whitespace-to-next-line reader)
   (condp = (r/peek-char reader)
     \: (read-sing-line-header reader)
+    \~ (read-sing-line-expr reader)
     (skip-to-next-line reader)))
 
 (defn- read-mult-line-comment
@@ -230,6 +248,7 @@
   (skip-whitespace-to-next-line reader)
   (condp = (r/peek-char reader)
     \: (read-mult-line-header reader)
+    \~ (read-mult-line-expr reader)
     (skip-to-chars reader \* \/)))
 
 (defn- read-quoted

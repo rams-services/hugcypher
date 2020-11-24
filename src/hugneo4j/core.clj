@@ -2,9 +2,11 @@
   (:require [hugneo4j.parser :as parser]
             [hugneo4j.parameters :as parameters]
             [hugneo4j.cypher :as cypher]
+            [hugneo4j.expr-run]
             [clojure.java.io :as io]
             [clojure.string :as string]
-            [clojure.tools.reader.edn :as edn]))
+            [clojure.tools.reader.edn :as edn]
+            [clojure.tools.logging :as log]))
 
 (defn ^:no-doc parsed-defs-from-string
   "Given a hugneo4j Cypher string,
@@ -68,11 +70,99 @@
                 (str "Parameter Mismatch: "
                      k " parameter data not found.") {}))))))
 
+
+(defn ^:no-doc expr-name
+  [expr]
+  (str "expr-" (hash (pr-str expr))))
+
+(defn ^:no-doc def-expr
+  ([expr] (def-expr expr nil))
+  ([expr require-str]
+   (let [nam (keyword (expr-name expr))
+         tag (reduce
+              (fn [r c]
+                (if (vector? c)
+                  (conj r {:expr c})
+                  (if-let [o (:other (last r))]
+                    (conj (vec (butlast r)) (assoc (last r) :other (conj o c)))
+                    (conj r {:other [c]}))))
+              []
+              expr)
+         clj (str "(ns hugneo4j.expr-run\n"
+                  (when-not (string/blank? require-str)
+                    (str "(:require " require-str ")"))
+                  ")\n"
+                  "(swap! exprs assoc " nam "(fn [params options] "
+                  (string/join
+                   " "
+                   (filter
+                    #(not (= % :cont))
+                    (map (fn [x]
+                           (if (:expr x)
+                             (first (:expr x))
+                             (pr-str (:other x))))
+                         tag)))
+                  "))")]
+     (load-string clj))))
+
+(defn ^:no-doc compile-exprs
+  "Compile (def) all expressions in a parsed def"
+  [pdef]
+  (let [require-str (string/join " " (:require (:header pdef)))]
+    (doseq [expr (filter vector? (:cypher pdef))]
+      (def-expr expr require-str))))
+
+
+(defn ^:no-doc run-expr
+  "Run expression and return result.
+   Example assuming cols is [\"id\"]:
+
+   [[\"(if (seq (:cols params))\" :cont]
+     {:type :i* :name :cols}
+     [:cont] \"*\" [\")\" :end]]
+   to:
+   {:type :i* :name :cols}"
+  [expr params options]
+  (let [expr-fn #(get @hugneo4j.expr-run/exprs (keyword (expr-name expr)))]
+    (when (nil? (expr-fn)) (def-expr expr))
+    (while (nil? (expr-fn)) (Thread/sleep 1))
+    (let [result ((expr-fn) params options)]
+      (if (string? result)
+        (:cypher (first (parser/parse result {:no-header true})))
+        result))))
+
+(defn ^:no-doc expr-pass
+  "Takes a cypher template (from parser) and evaluates the
+  Clojure expressions resulting in returning a cypher template
+  containing only cypher strings and hashmap parameters"
+  [neo4j-template params options]
+  (loop [curr (first neo4j-template)
+         pile (rest neo4j-template)
+         rcypher []
+         expr []]
+    (if-not curr
+      rcypher
+      (cond
+        (or (vector? curr) (seq expr)) ;; expr start OR already in expr
+        ;; expr end found, so run
+        (if (and (vector? curr) (= :end (last curr)))
+          (recur (first pile) (rest pile)
+                 (if-let [r (run-expr (conj expr curr) params options)]
+                   (vec (concat rcypher (if (string? r) (vector r) r)))
+                   rcypher) [])
+          (recur (first pile) (rest pile)
+                 rcypher (conj expr curr)))
+
+        :else
+        (recur (first pile) (rest pile) (conj rcypher curr) expr)))))
+
+
 (defn ^:no-doc prepare-cypher
   "Takes a cypher template (from parser) and the runtime-provided
   param data and creates the input for the query function."
   ([neo4j-template param-data options]
-   (let [_ (validate-parameters! neo4j-template param-data)
+   (let [neo4j-template (expr-pass neo4j-template param-data options)
+         _ (validate-parameters! neo4j-template param-data)
          applied (map
                   #(if (string? %)
                      [%]
@@ -260,6 +350,7 @@
   ([file options]
    `(doseq [~'pdef (parsed-defs-from-file ~file)]
       (validate-parsed-def! ~'pdef)
+      (compile-exprs ~'pdef)
       (intern-cyphervec-fn ~'pdef ~options))))
 
 (defmacro def-cyphervec-fns-from-string
@@ -267,6 +358,7 @@
   ([s options]
    `(doseq [~'pdef (parsed-defs-from-string ~s)]
       (validate-parsed-def! ~'pdef)
+      (compile-exprs ~'pdef)
       (intern-cyphervec-fn ~'pdef ~options))))
 
 (defmacro map-of-cyphervec-fns
@@ -282,7 +374,8 @@
   ([file options]
    `(let [~'pdefs (parsed-defs-from-file ~file)]
       (doseq [~'pdef ~'pdefs]
-        (validate-parsed-def! ~'pdef))
+        (validate-parsed-def! ~'pdef)
+        (compile-exprs ~'pdef))
       (apply merge
              (map #(cyphervec-fn-map % ~options) ~'pdefs)))))
 
@@ -291,7 +384,8 @@
   ([s options]
    `(let [~'pdefs (parsed-defs-from-string ~s)]
       (doseq [~'pdef ~'pdefs]
-        (validate-parsed-def! ~'pdef))
+        (validate-parsed-def! ~'pdef)
+        (compile-exprs ~'pdef))
       (apply merge
              (map #(cyphervec-fn-map % ~options) ~'pdefs)))))
 
@@ -392,6 +486,7 @@
   ([file options]
    `(doseq [~'pdef (parsed-defs-from-file ~file)]
       (validate-parsed-def! ~'pdef)
+      (compile-exprs ~'pdef)
       (if (snippet-pdef? ~'pdef)
         (intern-cyphervec-fn ~'pdef ~options)
         (intern-db-fn ~'pdef ~options)))))
@@ -407,6 +502,7 @@
   ([s options]
    `(doseq [~'pdef (parsed-defs-from-string ~s)]
       (validate-parsed-def! ~'pdef)
+      (compile-exprs ~'pdef)
       (if (snippet-pdef? ~'pdef)
         (intern-cyphervec-fn ~'pdef ~options)
         (intern-db-fn ~'pdef ~options)))))
@@ -429,7 +525,8 @@
   ([file options]
    `(let [~'pdefs (parsed-defs-from-file ~file)]
       (doseq [~'pdef ~'pdefs]
-        (validate-parsed-def! ~'pdef))
+        (validate-parsed-def! ~'pdef)
+        (compile-exprs ~'pdef))
       (apply merge
              (map
               #(if (snippet-pdef? %)
@@ -455,7 +552,8 @@
   ([s options]
    `(let [~'pdefs (parsed-defs-from-string ~s)]
       (doseq [~'pdef ~'pdefs]
-        (validate-parsed-def! ~'pdef))
+        (validate-parsed-def! ~'pdef)
+        (compile-exprs ~'pdef))
       (apply merge
              (map
               #(if (snippet-pdef? %)
