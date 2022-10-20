@@ -1,9 +1,9 @@
-(ns hugneo4j.parser
+(ns hugcypher.parser
   (:require [clojure.string :as string]
             [selmer.parser :as selmer]
             [clojure.tools.logging :as log]
             [clojure.tools.reader.reader-types :as r]
-            [clojure.tools.reader.edn :as edn]))
+            [clojure.edn :as edn]))
 
 (defn- parse-error
   ([reader msg]
@@ -264,7 +264,7 @@
                   (str (sb-append s c))))
         (recur (sb-append s c) (r/read-char reader))))))
 
-(defn- read-neo4j-param
+(defn- read-cypher-param
   [reader c]
   (let [{:keys [name namespace type]} (read-param reader c)]
     {:type (keyword (or type "v"))
@@ -272,7 +272,7 @@
              (keyword namespace name)
              (keyword name))}))
 
-(defn read-neo4j-map-object
+(defn read-cypher-map-object
   [reader c]
   (let [{:keys [name namespace type]} (read-param reader c)
         [map-object-name param-name] (split-hash-param name)]
@@ -294,18 +294,22 @@
     (set (when (:audit header)
            (let [audit (edn/read-string
                         (get-in header [:audit 0]))]
-             (concat (if (not (contains? audit :by))
-                       [:by]
-                       (if (map? (:by audit))
-                         [(get-in audit [:by :param])]
-                         [(:by audit)]))
+             (concat (when (contains? audit :params)
+                       (for [[k v] (:params audit)
+                             :when (not-any? #(= k %) [:message :by])]
+                         v))
+                     (if (not (contains? audit :by))
+                         [:by]
+                         (if (map? (:by audit))
+                           [(get-in audit [:by :param])]
+                           [(:by audit)]))
                      (if (not (contains? audit :message))
                        [:message]
                        (when (keyword? (:message audit))
                          [(:message audit)])))))))))
 
 (defn parse
-  "Parse hugneo4j Cypher string and return
+  "Parse hugcypher Cypher string and return
    sequence of statement definitions
    of the form:
    {:header {:name   [\"my-query\"]
@@ -318,15 +322,15 @@
              {:type :v :name :id}]}
 
    Throws clojure.lang.ExceptionInfo on error."
-  ([neo4j-str] (parse neo4j-str {}))
-  ([neo4j-str {:keys [no-header file]}]
-   (if (string/blank? neo4j-str)
-     (throw (ex-info "Neo4j is empty" {}))
-     (let [neo4j-str (string/replace neo4j-str "\r\n" "\n")
-           reader (r/source-logging-push-back-reader neo4j-str)
+  ([cypher-str] (parse cypher-str {}))
+  ([cypher-str {:keys [no-header file]}]
+   (if (string/blank? cypher-str)
+     (throw (ex-info "Cypher is empty" {}))
+     (let [cypher-str (string/replace cypher-str "\r\n" "\n")
+           reader (r/source-logging-push-back-reader cypher-str)
            new-string-builder #(StringBuilder.)]
        (loop [header {}
-              neo4j []
+              cypher []
               string-builder  (new-string-builder)
               all []
               parameters []]
@@ -340,7 +344,7 @@
                                 (and
                                  (every? string? (:cypher %))
                                  (string/blank? (string/join (:cypher %))))))
-                      (let [cypher-list (filterv seq (conj neo4j (string/trimr string-builder)))]
+                      (let [cypher-list (filterv seq (conj cypher (string/trimr string-builder)))]
                         (conj all
                               {:header (when (not (empty? header))
                                          (assoc
@@ -362,7 +366,7 @@
                    (recur (merge x {:file file :line (max 1 (dec (r/get-line-number reader)))})
                           []
                           (new-string-builder)
-                          (let [cypher-list (filterv seq (conj neo4j (string/trimr string-builder)))]
+                          (let [cypher-list (filterv seq (conj cypher (string/trimr string-builder)))]
                             (conj all
                                   {:header (when (not (empty? header))
                                              (assoc
@@ -370,29 +374,29 @@
                                               :params (get-params-for-header parameters
                                                                              cypher-list
                                                                              header)))
-                                   :cypher (filterv seq (conj neo4j (str string-builder)))}))
+                                   :cypher (filterv seq (conj cypher (str string-builder)))}))
                           [])
-                   (recur (merge header x) neo4j string-builder all parameters))
+                   (recur (merge header x) cypher string-builder all parameters))
                  ;; hint
                  (string? x)
-                 (recur header neo4j (sb-append string-builder x) all parameters)
+                 (recur header cypher (sb-append string-builder x) all parameters)
                  :else
                  ;; clj expr was read from comment
-                 (recur header (conj neo4j (str string-builder) x) (new-string-builder) all parameters))
-               (recur header neo4j string-builder all parameters))
+                 (recur header (conj cypher (str string-builder) x) (new-string-builder) all parameters))
+               (recur header cypher string-builder all parameters))
 
              (quoted-start? character)
-             (recur header neo4j (sb-append string-builder
+             (recur header cypher (sb-append string-builder
                                             (read-quoted reader character))
                     all parameters)
 
              (unmatched-quoted? character)
-             (parse-error reader (str "Unmatched Neo4j quote: " character))
+             (parse-error reader (str "Unmatched Cypher quote: " character))
 
              (hash-start? character)
-             (let [param (read-neo4j-map-object reader character)]
+             (let [param (read-cypher-map-object reader character)]
                (recur header (vec (filter seq
-                                   (conj neo4j (str string-builder)
+                                   (conj cypher (str string-builder)
                                          param))) (new-string-builder) all (cond (= (:type param) :v)
                             (conj parameters (:name param))
                             (= (:type param) :m)
@@ -401,10 +405,10 @@
                             parameters)))
              
              (param-start? character)
-             (let [param (read-neo4j-param reader character)]
+             (let [param (read-cypher-param reader character)]
                (recur header
                       (vec (filter seq
-                                   (conj neo4j (str string-builder)
+                                   (conj cypher (str string-builder)
                                          param)))
                       (new-string-builder)
                       all
@@ -417,6 +421,6 @@
 
              :else
              (if (and (not (string/blank? string-builder)) (empty? header) (not no-header))
-               (parse-error reader "Encountered Neo4j with no hug4neo4j header")
-               (recur header neo4j (sb-append string-builder character)
+               (parse-error reader "Encountered Cypher with no hugcypher header")
+               (recur header cypher (sb-append string-builder character)
                       all parameters)))))))))

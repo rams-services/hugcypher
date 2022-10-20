@@ -1,6 +1,8 @@
-(ns hugneo4j.cypher
+(ns hugcypher.cypher
   (:require [clojurewerkz.neocons.bolt :as neobolt]
             [selmer.parser :as parser]
+            [clojure.string :as cstr]
+            [clj-http.client :as curl ]
             [clojure.tools.logging :as log]))
 
 (defn- is-driver-obj? [v]
@@ -52,14 +54,13 @@
                                                 (:default-id @default-audit-params))}))
   
   (defn connect
-    ([database-url]
-     (connect database-url nil nil))
-    ([database-url username]
-     (connect database-url username nil))
-    ([database-url username password]
-     (neobolt/connect database-url username password)))
+    [type config]
+    (case type
+      :neo4j (neobolt/connect (:url config) (:username config)
+                              (:password config))
+      :arcadedb-http true))
 
-  (defn query
+  (defn- query-neo4j
     [conn query-info-list]
     (with-open [session (neobolt/create-session conn)]
       (let [query-list (first query-info-list)]
@@ -67,6 +68,46 @@
                         (first query-list)
                         (apply merge {} (second query-list)))
          (second query-info-list)])))
+  
+  (defn- query-http
+    [conn query-info-list]
+    (let [query-list (first query-info-list)
+          params (when (seq (second query-list))
+                   (apply merge {} (second query-list)))
+          has-id? (contains? params "id")
+          null-params (when params
+                        (filter #(nil? (second %)) params))
+          new-id "hugcypherID"
+          cleaned-command (loop [temp (cstr/replace (first query-list)
+                                                    "`id`" (str "`" new-id "`"))
+                                 items null-params]
+                            (if (empty? items)
+                              temp
+                              (recur (cstr/replace temp (re-pattern (str "\\$`" (first (first items)) "`"))
+                                                   "NULL")
+                                     (rest items))))]
+      [(:result
+         (:body
+          (curl/post (:database-url conn)
+                     {:basic-auth [(:username conn) (:password conn)]
+                      :content-type :json :as :json
+                      :body (curl/json-encode (merge {:language "cypher"
+                                                      :command cleaned-command}
+                                                     (when params
+                                                       {:params (if has-id?
+                                                                  (-> params
+                                                                      (dissoc "id")
+                                                                      (assoc new-id (get params "id")))
+                                                                  params)})))})))
+       (second query-info-list)]))
+  
+  (defn query
+    [type conn query-info-list]
+    (case type
+      :neo4j (query-neo4j conn query-info-list)
+      :arcadedb-http (query-http conn query-info-list)
+      :arcadedb-psql nil
+      nil))
 
   (defn without-audit
     [conn query-responses-list options audit-params param-data]
@@ -123,13 +164,19 @@
                                               (name (get-in audit-params [:by :param]))
                                               (name (:by audit-params)))]
                              (merge {param-name (get data-params (keyword param-name))
-                                     "audit-props" {"message" (if (not (contains? audit-params :message))
-                                                                (get data-params :message)
-                                                                (if (keyword? (:message audit-params))
-                                                                  (get data-params
-                                                                       (keyword (:message audit-params)))
-                                                                  (:message audit-params)))
-                                                    "created-on" (get-datetime-helper)}}
+                                     "audit-props" (merge
+                                                    (when (contains? audit-params :params)
+                                                      (into {}
+                                                            (for [[k v] (:params audit-params)
+                                                                  :when (not-any? #(= k %) [:message :by])]
+                                                              [(name k) v])))
+                                                    {"message" (if (not (contains? audit-params :message))
+                                                                 (get data-params :message)
+                                                                 (if (keyword? (:message audit-params))
+                                                                   (get data-params
+                                                                        (keyword (:message audit-params)))
+                                                                   (:message audit-params)))
+                                                     "created-on" (get-datetime-helper)})}
                                     (into {}
                                           (for [[k v] query-response
                                                 :when (is-driver-obj? v)]
