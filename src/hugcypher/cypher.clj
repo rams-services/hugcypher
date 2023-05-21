@@ -169,14 +169,21 @@
                                                       (into {}
                                                             (for [[k v] (:params audit-params)
                                                                   :when (not-any? #(= k %) [:message :by])]
-                                                              [(name k) v])))
+                                                              [(name k) (if (keyword? v)
+                                                                          (get data-params v)
+                                                                          v)])))
                                                     {"message" (if (not (contains? audit-params :message))
                                                                  (get data-params :message)
                                                                  (if (keyword? (:message audit-params))
                                                                    (get data-params
                                                                         (keyword (:message audit-params)))
                                                                    (:message audit-params)))
-                                                     "created-on" (get-datetime-helper)})}
+                                                     "created-on" (if (and (not (contains? audit-params :created-on))
+                                                                           (contains? data-params :created-on))
+                                                                    (get data-params :created-on)
+                                                                    (if (keyword? (:created-on audit-params))
+                                                                      (get data-params (:created-on audit-params))
+                                                                      (get-datetime-helper)))})}
                                     (into {}
                                           (for [[k v] query-response
                                                 :when (is-driver-obj? v)]
