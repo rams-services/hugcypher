@@ -1,5 +1,5 @@
 (ns hugcypher.cypher
-  (:require [clojurewerkz.neocons.bolt :as neobolt]
+  (:require [neo4jclj.core :as neo4jclj]
             [selmer.parser :as parser]
             [clojure.string :as cstr]
             [clj-http.client :as curl ]
@@ -56,18 +56,14 @@
   (defn connect
     [type config]
     (case type
-      :neo4j (neobolt/connect (:url config) (:username config)
-                              (:password config))
+      :neo4j (neo4jclj/connect (:url config) (:username config)
+                               (:password config) (:opts config))
       :arcadedb-http true))
 
   (defn- query-neo4j
     [conn query-info-list]
-    (with-open [session (neobolt/create-session conn)]
-      (let [query-list (first query-info-list)]
-        [(neobolt/query session
-                        (first query-list)
-                        (apply merge {} (second query-list)))
-         (second query-info-list)])))
+    [(neo4jclj/query conn (first query-info-list) (second query-info-list))
+     (second query-info-list)])
   
   (defn- query-http
     [conn query-info-list]
@@ -115,79 +111,78 @@
   
   (defn audit
     [conn query-responses-list options audit-params data-params]
-    (let [query-responses (first query-responses-list)]
-      (with-open [session (neobolt/create-session conn)]
-        (let [audit-nodes (if (:node audit-params)
-                            [(:node audit-params)]
-                            (if (vector? (:nodes audit-params))
-                              (:nodes audit-params)
-                              [(:nodes audit-params)]))]
-          (doseq [query-response (if (map? query-responses)
-                                   [query-responses]
-                                   query-responses)]
-            (neobolt/query session
-                           (str "MATCH (`audit-by`:" (if (and (map? (:by audit-params))
-                                                              (get-in audit-params [:by :node]))
-                                                       (get-in audit-params [:by :node])
-                                                       (:node @default-audit-params))
-                                ") WHERE `audit-by`.`" (if (and (map? (:by audit-params))
-                                                                (get-in audit-params [:by :attribute]))
-                                                         (get-in audit-params [:by :attribute])
-                                                         (:id-attribute @default-audit-params))
-                                "`=$`" (if (not (contains? audit-params :by))
-                                         "by"
-                                         (if (map? (:by audit-params))
+    (let [query-responses (first query-responses-list)
+          audit-nodes (if (:node audit-params)
+                        [(:node audit-params)]
+                        (if (vector? (:nodes audit-params))
+                          (:nodes audit-params)
+                          [(:nodes audit-params)]))]
+      (doseq [query-response (if (map? query-responses)
+                               [query-responses]
+                               query-responses)]
+        (neo4jclj/query conn
+                        (str "MATCH (`audit-by`:" (if (and (map? (:by audit-params))
+                                                           (get-in audit-params [:by :node]))
+                                                    (get-in audit-params [:by :node])
+                                                    (:node @default-audit-params))
+                             ") WHERE `audit-by`.`" (if (and (map? (:by audit-params))
+                                                             (get-in audit-params [:by :attribute]))
+                                                      (get-in audit-params [:by :attribute])
+                                                      (:id-attribute @default-audit-params))
+                             "`=$`" (if (not (contains? audit-params :by))
+                                      "by"
+                                      (if (map? (:by audit-params))
+                                        (name (get-in audit-params [:by :param]))
+                                        (name (:by audit-params)))) "` "
+                             (clojure.string/join
+                              " " (for [[k v] query-response
+                                        :when (and (is-driver-obj? v)
+                                                   (some #(= k (if (symbol? %)
+                                                                 (name %) %))
+                                                         audit-nodes))]
+                                    (str "MATCH (`" k "`:"
+                                         (clojure.string/join
+                                          ":" (.labels v))
+                                         ") WHERE ID(`" k "`)=$`"
+                                         k "-id`")))
+                             "CREATE (`audit-by`)-[:" (:relationship @default-audit-params)
+                             " $`audit-props`]->"
+                             (if (> (count audit-nodes) 1)
+                               (str "(`audit-with`:" (:connecting-node @default-audit-params) ") "
+                                    (clojure.string/join
+                                     " " (for [ky audit-nodes]
+                                           (str "CREATE (`audit-with`)-[:"
+                                                (:made-relation @default-audit-params)
+                                                "]->(`" ky "`)"))))
+                               (str "(`" (first audit-nodes) "`)")))
+                        (let [param-name (if (map? (:by audit-params))
                                            (name (get-in audit-params [:by :param]))
-                                           (name (:by audit-params)))) "` "
-                                (clojure.string/join
-                                 " " (for [[k v] query-response
-                                           :when (and (is-driver-obj? v)
-                                                      (some #(= k (if (symbol? %)
-                                                                    (name %) %))
-                                                            audit-nodes))]
-                                       (str "MATCH (`" k "`:"
-                                            (clojure.string/join
-                                             ":" (.labels v))
-                                            ") WHERE ID(`" k "`)=$`"
-                                            k "-id`")))
-                                "CREATE (`audit-by`)-[:" (:relationship @default-audit-params)
-                                " $`audit-props`]->"
-                                (if (> (count audit-nodes) 1)
-                                  (str "(`audit-with`:" (:connecting-node @default-audit-params) ") "
-                                       (clojure.string/join
-                                        " " (for [ky audit-nodes]
-                                              (str "CREATE (`audit-with`)-[:"
-                                                   (:made-relation @default-audit-params)
-                                                   "]->(`" ky "`)"))))
-                                  (str "(`" (first audit-nodes) "`)")))
-                           (let [param-name (if (map? (:by audit-params))
-                                              (name (get-in audit-params [:by :param]))
-                                              (name (:by audit-params)))]
-                             (merge {param-name (get data-params (keyword param-name))
-                                     "audit-props" (merge
-                                                    (when (contains? audit-params :params)
-                                                      (into {}
-                                                            (for [[k v] (:params audit-params)
-                                                                  :when (not-any? #(= k %) [:message :by])]
-                                                              [(name k) (if (keyword? v)
-                                                                          (get data-params v)
-                                                                          v)])))
-                                                    {"message" (if (not (contains? audit-params :message))
-                                                                 (get data-params :message)
-                                                                 (if (keyword? (:message audit-params))
-                                                                   (get data-params
-                                                                        (keyword (:message audit-params)))
-                                                                   (:message audit-params)))
-                                                     "created-on" (if (and (not (contains? audit-params :created-on))
-                                                                           (contains? data-params :created-on))
-                                                                    (get data-params :created-on)
-                                                                    (if (keyword? (:created-on audit-params))
-                                                                      (get data-params (:created-on audit-params))
-                                                                      (get-datetime-helper)))})}
-                                    (into {}
-                                          (for [[k v] query-response
-                                                :when (is-driver-obj? v)]
-                                            [(str k "-id") (.id v)])))))))))
+                                           (name (:by audit-params)))]
+                          (merge {param-name (get data-params (keyword param-name))
+                                  "audit-props" (merge
+                                                 (when (contains? audit-params :params)
+                                                   (into {}
+                                                         (for [[k v] (:params audit-params)
+                                                               :when (not-any? #(= k %) [:message :by])]
+                                                           [(name k) (if (keyword? v)
+                                                                       (get data-params v)
+                                                                       v)])))
+                                                 {"message" (if (not (contains? audit-params :message))
+                                                              (get data-params :message)
+                                                              (if (keyword? (:message audit-params))
+                                                                (get data-params
+                                                                     (keyword (:message audit-params)))
+                                                                (:message audit-params)))
+                                                  "created-on" (if (and (not (contains? audit-params :created-on))
+                                                                        (contains? data-params :created-on))
+                                                                 (get data-params :created-on)
+                                                                 (if (keyword? (:created-on audit-params))
+                                                                   (get data-params (:created-on audit-params))
+                                                                   (get-datetime-helper)))})}
+                                 (into {}
+                                       (for [[k v] query-response
+                                             :when (is-driver-obj? v)]
+                                         [(str k "-id") (.id v)])))))))
     query-responses-list))
 
 
