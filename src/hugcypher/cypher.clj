@@ -62,8 +62,11 @@
 
   (defn- query-neo4j
     [conn query-info-list]
-    [(neo4jclj/query conn (first query-info-list) (second query-info-list))
-     (second query-info-list)])
+    (let [query-list (first query-info-list)]
+      [(neo4jclj/query conn
+                       (first query-list)
+                       (apply merge {} (second query-list)))
+       (second query-info-list)]))
   
   (defn- query-http
     [conn query-info-list]

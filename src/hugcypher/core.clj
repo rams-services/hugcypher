@@ -414,7 +414,8 @@
            (:audit options)
            param-data)
           ((resolve (result-fn result)) var-x)
-          ((resolve (response-fn response)) var-x)
+          (or (and (= type :neo4j) var-x)
+              ((resolve (response-fn response)) var-x))
           ((resolve (output-fn debug)) var-x o)))))))
 
 (defn db-fn
