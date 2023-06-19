@@ -453,9 +453,9 @@
                      :audit audit
                      :file (:file header)
                      :line (:line header)
-                     :arglists `([~'db ~params-sym]
-                                 [~'db ~params-sym]
-                                 [~'db ~params-sym ~'options & ~'command-options])}
+                     :arglists `([~'type ~'db ~params-sym]
+                                 [~'type ~'db ~params-sym]
+                                 [~'type ~'db ~params-sym ~'options & ~'command-options])}
                     (when private-name {:private true}))]
     {(keyword fn-name) {:meta meta
                         :fn (db-fn* cypher response result audit
