@@ -1,4 +1,4 @@
-(defproject net.clojars.rams-services/hugcypher "0.1.2"
+(defproject net.clojars.rams-services/hugcypher "0.1.3"
   :description "HugCypher offers a similar experience to the excellent HugSql library but for cypher. As a matter of fact this library copies some very important parts from HugSql. It extends the original hugneo4j by providing support for both neo4j and arcadedb"
   :url "https://github.com/rams-services/hugcypher"
   :license {:name "Apache License, Version 2.0"
