@@ -1,4 +1,4 @@
-(ns hugneo4j.parameters
+(ns hugcypher.parameters
   (:require [clojure.string :as string]
             [clojure.walk :as walk]))
 
@@ -30,13 +30,17 @@
              (mapv key-fn (rest names)))
       (mapv key-fn names))))
 
+(defn- clear-param-name [param-name]
+  (string/replace param-name #"[\@\-\?]" "_"))
+
 ;; Default Object implementations
 (extend-type Object
   ValueParam
   (value-param [param data options]
-    (let [param-name (if (keyword? (:name param))
-                       (name (:name param))
-                       (:name param))
+    (let [param-name (clear-param-name
+                      (if (keyword? (:name param))
+                        (name (:name param))
+                        (:name param)))
           value (get-in data (deep-get-vec (:name param)))]
       [(str "$`"  param-name "`")
        {param-name (if (map? value)
@@ -59,12 +63,12 @@
                                   (str "`" param-object "`.`" prop-name "` = $`" param-name "`.`" prop-name "`"))))
        {param-name (walk/stringify-keys ((:name param) data))}])))
 
-(defmulti apply-hugneo4j-param
-  "Implementations of this multimethod apply a hugneo4j parameter
+(defmulti apply-hugcypher-param
+  "Implementations of this multimethod apply a hugcypher parameter
    for a specified parameter type."
   (fn [param data options] (:type param)))
 
-(defmethod apply-hugneo4j-param :v  [param data options] (value-param param data options))
-(defmethod apply-hugneo4j-param :value [param data options] (value-param param data options))
-(defmethod apply-hugneo4j-param :m [param data options] (build-set-from-map param data options))
-(defmethod apply-hugneo4j-param :map [param data options] (build-set-from-map param data options))
+(defmethod apply-hugcypher-param :v  [param data options] (value-param param data options))
+(defmethod apply-hugcypher-param :value [param data options] (value-param param data options))
+(defmethod apply-hugcypher-param :m [param data options] (build-set-from-map param data options))
+(defmethod apply-hugcypher-param :map [param data options] (build-set-from-map param data options))

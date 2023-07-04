@@ -1,21 +1,21 @@
-(ns hugneo4j.core
-  (:require [hugneo4j.parser :as parser]
-            [hugneo4j.parameters :as parameters]
-            [hugneo4j.cypher :as cypher]
-            [hugneo4j.expr-run]
+(ns hugcypher.core
+  (:require [hugcypher.parser :as parser]
+            [hugcypher.parameters :as parameters]
+            [hugcypher.cypher :as cypher]
+            [hugcypher.expr-run]
             [clojure.java.io :as io]
             [clojure.string :as string]
-            [clojure.tools.reader.edn :as edn]
+            [clojure.edn :as edn]
             [clojure.tools.logging :as log]))
 
 (defn ^:no-doc parsed-defs-from-string
-  "Given a hugneo4j Cypher string,
+  "Given a hugcypher Cypher string,
    parse it, and return the defs."
-  [neo4j]
-  (parser/parse neo4j))
+  [cypher]
+  (parser/parse cypher))
 
 (defn ^:no-doc parsed-defs-from-file
-  "Given a hugneo4j Cypher file in the classpath,
+  "Given a hugcypher Cypher file in the classpath,
    a resource, or a java.io.File, parse it, and return the defs."
   [file]
   (parser/parse
@@ -33,18 +33,18 @@
             file)}))
 
 (defn ^:no-doc validate-parsed-def!
-  "Ensure Neo4j required headers are provided
+  "Ensure Cypher required headers are provided
    and throw an exception if not."
   [pdef]
   (let [header (:header pdef)]
     (when-not (or (:name header) (:name- header) (:snip header) (:snip- header))
       (throw (ex-info
-              (str "Missing HugNeo4j Header of :name, :name-, :snip, or :snip-\n"
+              (str "Missing Hugcypher Header of :name, :name-, :snip, or :snip-\n"
                    "Found headers include: " (pr-str (vec (keys header))) "\n"
                    "Cypher: " (pr-str (:cypher pdef))) {})))
     (when (every? empty? [(:name header) (:name- header) (:snip header) (:snip- header)])
       (throw (ex-info
-              (str "HugNeo4j Header :name, :name-, :snip, or :snip- not given.\n"
+              (str "Hugcypher Header :name, :name-, :snip, or :snip- not given.\n"
                    "Cypher: " (pr-str (:cypher pdef))) {})))))
 
 (defn ^:no-doc validate-parameters!
@@ -88,7 +88,7 @@
                     (conj r {:other [c]}))))
               []
               expr)
-         clj (str "(ns hugneo4j.expr-run\n"
+         clj (str "(ns hugcypher.expr-run\n"
                   (when-not (string/blank? require-str)
                     (str "(:require " require-str ")"))
                   ")\n"
@@ -123,7 +123,7 @@
    to:
    {:type :i* :name :cols}"
   [expr params options]
-  (let [expr-fn #(get @hugneo4j.expr-run/exprs (keyword (expr-name expr)))]
+  (let [expr-fn #(get @hugcypher.expr-run/exprs (keyword (expr-name expr)))]
     (when (nil? (expr-fn)) (def-expr expr))
     (while (nil? (expr-fn)) (Thread/sleep 1))
     (let [result ((expr-fn) params options)]
@@ -135,9 +135,9 @@
   "Takes a cypher template (from parser) and evaluates the
   Clojure expressions resulting in returning a cypher template
   containing only cypher strings and hashmap parameters"
-  [neo4j-template params options]
-  (loop [curr (first neo4j-template)
-         pile (rest neo4j-template)
+  [cypher-template params options]
+  (loop [curr (first cypher-template)
+         pile (rest cypher-template)
          rcypher []
          expr []]
     (if-not curr
@@ -160,17 +160,17 @@
 (defn ^:no-doc prepare-cypher
   "Takes a cypher template (from parser) and the runtime-provided
   param data and creates the input for the query function."
-  ([neo4j-template param-data options]
-   (let [neo4j-template (expr-pass neo4j-template param-data options)
-         _ (validate-parameters! neo4j-template param-data)
+  ([cypher-template param-data options]
+   (let [cypher-template (expr-pass cypher-template param-data options)
+         _ (validate-parameters! cypher-template param-data)
          applied (map
                   #(if (string? %)
                      [%]
-                     (parameters/apply-hugneo4j-param % param-data options))
-                  neo4j-template)
-         neo4j    (string/join "" (map first applied))
+                     (parameters/apply-hugcypher-param % param-data options))
+                  cypher-template)
+         cypher    (string/join "" (map first applied))
          params (apply concat (filterv seq (map rest applied)))]
-     [(string/trim neo4j) params])))
+     [(string/trim cypher) params])))
 
 (def default-cyphervec-options
   {:quoting :off
@@ -265,7 +265,7 @@
 
 (defn cyphervec-fn*
   "Given parsed cypher and optional options, return an
-   anonymous function that returns hugneo4j format"
+   anonymous function that returns hugcypher format"
   ([pcypher] (cyphervec-fn* pcypher {}))
   ([pcypher options]
    (fn y
@@ -276,7 +276,7 @@
 
 (defn cyphervec-fn
   "Given an cypher string and optional options, return an
-   anonymous function that returns hugneo4j format"
+   anonymous function that returns hugcypher format"
   ([cypher] (cyphervec-fn cypher {}))
   ([cypher options]
    (let [cypher-vec (:cypher (first (parser/parse cypher {:no-header true})))]
@@ -331,7 +331,7 @@
             (-> fm fk :fn))))
 
 (defmacro def-cyphervec-fns
-  "Given a HugNeo4j Cypher file, define the <name>-cyphervec functions in the
+  "Given a Hugcypher Cypher file, define the <name>-cyphervec functions in the
   current namespace.  Returns cyphervec format
   Usage:
 
@@ -362,7 +362,7 @@
       (intern-cyphervec-fn ~'pdef ~options))))
 
 (defmacro map-of-cyphervec-fns
-  "Given a HugNeo4j Cypher file, return a hashmap of database
+  "Given a Hugcypher Cypher file, return a hashmap of database
    functions of the form:
 
    {:fn1-name {:meta {:doc \"doc string\"}
@@ -391,8 +391,8 @@
 
 (defn db-fn*
   "Given parsed cypher and optionally a response, result, audit, debug and options,
-  return an anonymous function that can run hugneo4j database
-  query and supports hugneo4j parameter replacement"
+  return an anonymous function that can run hugcypher database
+  query and supports hugcypher parameter replacement"
   ([parsed-cypher] (db-fn* parsed-cypher :obj :* :default :default {}))
   ([parsed-cypher response] (db-fn* parsed-cypher response :* :default :default {}))
   ([parsed-cypher response result] (db-fn* parsed-cypher response result :default :default {}))
@@ -400,16 +400,16 @@
   ([parsed-cypher response result audit debug] (db-fn* parsed-cypher response result audit debug {}))
   ([parsed-cypher response result audit debug options]
    (fn y
-     ([conn] (y conn {} {}))
-     ([conn param-data] (y conn param-data {}))
-     ([conn param-data opts]
+     ([type conn] (y type conn {} {}))
+     ([type conn param-data] (y type conn param-data {}))
+     ([type conn param-data opts]
       (let [o (merge default-db-options options opts
                      {:response response :result result
                       :audit audit :debug debug})]
         (as-> parsed-cypher var-x
           (prepare-cypher var-x param-data o)
           ((resolve (debug-fn debug)) var-x param-data)
-          (cypher/query conn var-x)
+          (cypher/query type conn var-x)
           ((resolve (audit-fn audit)) conn var-x o
            (:audit options)
            param-data)
@@ -419,8 +419,8 @@
 
 (defn db-fn
   "Given parsed cypher and optionally a response, result, audit, debug and options,
-  return an anonymous function that can run hugneo4j database
-  query and supports hugneo4j parameter replacement"
+  return an anonymous function that can run hugcypher database
+  query and supports hugcypher parameter replacement"
   ([cypher] (db-fn cypher :obj :* :default :default {}))
   ([cypher response] (db-fn cypher response :* :default :default {}))
   ([cypher response result] (db-fn cypher response result :default :default {}))
@@ -453,9 +453,9 @@
                      :audit audit
                      :file (:file header)
                      :line (:line header)
-                     :arglists `([~'db ~params-sym]
-                                 [~'db ~params-sym]
-                                 [~'db ~params-sym ~'options & ~'command-options])}
+                     :arglists `([~'type ~'db ~params-sym]
+                                 [~'type ~'db ~params-sym]
+                                 [~'type ~'db ~params-sym ~'options & ~'command-options])}
                     (when private-name {:private true}))]
     {(keyword fn-name) {:meta meta
                         :fn (db-fn* cypher response result audit
@@ -476,7 +476,7 @@
   (or (:snip- (:header pdef)) (:snip (:header pdef))))
 
 (defmacro def-db-fns
-  "Given a HugNeo4j CYPHER file, define the database
+  "Given a Hugcypher CYPHER file, define the database
    functions in the current namespace.
 
    Usage:
@@ -492,7 +492,7 @@
         (intern-db-fn ~'pdef ~options)))))
 
 (defmacro def-db-fns-from-string
-  "Given a Hugneo4j CYPHER string, define the database
+  "Given a Hugcypher CYPHER string, define the database
    functions in the current namespace.
 
    Usage:
@@ -508,7 +508,7 @@
         (intern-db-fn ~'pdef ~options)))))
 
 (defmacro map-of-db-fns
-  "Given a Hugneo4j CYPHER file, return a hashmap of database
+  "Given a Hugcypher CYPHER file, return a hashmap of database
    functions of the form:
 
    {:fn1-name {:meta {:doc \"doc string\"}
@@ -535,7 +535,7 @@
               ~'pdefs)))))
 
 (defmacro map-of-db-fns-from-string
-  "Given a Hugneo4j CYPHER string, return a hashmap of database
+  "Given a Hugcypher CYPHER string, return a hashmap of database
    functions of the form:
 
    {:fn1-name {:meta {:doc \"doc string\"}
@@ -565,14 +565,14 @@
   "Given a database spec/connection, cypher string,
    parameter data, and optional command, result,
    and options, run the cypher statement"
-  ([db cypher] (db-run db cypher {} :obj :* :default :default {}))
-  ([db cypher param-data] (db-run db cypher param-data :obj :* :default :default {}))
-  ([db cypher param-data response] (db-run db cypher param-data response :* :default :default {}))
-  ([db cypher param-data response result] (db-run db cypher param-data response result :default :default {}))
-  ([db cypher param-data response result audit]
-   (db-run db cypher param-data response result audit :default {}))
-  ([db cypher param-data response result audit debug]
-   (db-run db cypher param-data response result audit debug {}))
-  ([db cypher param-data response result audit debug options & command-options]
+  ([type db cypher] (db-run type db cypher {} :obj :* :default :default {}))
+  ([type db cypher param-data] (db-run type db cypher param-data :obj :* :default :default {}))
+  ([type db cypher param-data response] (db-run type db cypher param-data response :* :default :default {}))
+  ([type db cypher param-data response result] (db-run type db cypher param-data response result :default :default {}))
+  ([type db cypher param-data response result audit]
+   (db-run type db cypher param-data response result audit :default {}))
+  ([type db cypher param-data response result audit debug]
+   (db-run type db cypher param-data response result audit debug {}))
+  ([type db cypher param-data response result audit debug options & command-options]
    (let [f (db-fn cypher response result audit debug options)]
-     (f db param-data command-options))))
+     (f type db param-data command-options))))
