@@ -234,8 +234,8 @@
                    (apply merge out
                           (for [[k v] val]
                             (if (= (count (get list-keys k)) 1)
-                              (assoc out (keyword k) v)
-                              (assoc out (keyword (str it "." k)) v))))
+                              (assoc out k v)
+                              (assoc out (keyword (str (name it) "." (name k))) v))))
                    true
                    (assoc out (keyword it) val))))))))
 
