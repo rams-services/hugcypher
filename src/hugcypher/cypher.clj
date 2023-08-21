@@ -198,11 +198,18 @@
                       (let [it (first its)
                             val (get item it)]
                         (recur (rest its)
-                               (if (is-driver-obj? val)
+                               (cond
+                                 (is-driver-obj? val)
                                  (merge out
                                         (into {}
                                               (for [k (.keys val)]
                                                 [k (conj (get out k) it)])))
+                                 (map? val)
+                                 (merge out
+                                        (into {}
+                                              (for [k (keys val)]
+                                                [k (conj (get out k) it)])))
+                                 :else
                                  (assoc out it
                                         (conj (get out it) nil)))))))]
     (loop [its (keys item)
@@ -223,6 +230,12 @@
                               (if (= (count (get list-keys k)) 1)
                                 (assoc out (keyword k) v)
                                 (assoc out (keyword (str it "." k)) v)))))
+                   (map? val)
+                   (apply merge out
+                          (for [[k v] val]
+                            (if (= (count (get list-keys k)) 1)
+                              (assoc out (keyword k) v)
+                              (assoc out (keyword (str it "." k)) v))))
                    true
                    (assoc out (keyword it) val))))))))
 
